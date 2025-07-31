@@ -1,0 +1,219 @@
+:root {
+  --bg-color: #1d1d1d;
+  --text-color: #f0f0f0;
+  --link-color: #00CE9D;
+  --hover-color: #F3C969;
+}
+
+/* Tema claro */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-color: #f7f7f7;
+    --text-color: #0d0d0d;
+    --link-color: #676A6A;
+    --hover-color: #CDCAD3;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Segoe UI', sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+}
+
+/* Tarjeta principal */
+.card {
+  text-align: center;
+  background-color: rgba(34,34,34,0.9);
+  border-radius: 15px;
+  padding: 30px;
+  margin-top: 50px;
+  max-width: 360px;
+  width: 90%;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+}
+
+/* Imagen de perfil */
+.profile-img {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  margin-bottom: 15px;
+}
+
+/* Contacto */
+.contact p {
+  font-size: 14px;
+  margin: 6px 0;
+}
+
+.contact a {
+  color: var(--link-color);
+  text-decoration: none;
+}
+
+.contact a:hover {
+  color: var(--hover-color);
+}
+
+/* Botones */
+.buttons a {
+  display: block;
+  margin: 10px 0;
+  text-decoration: none;
+  font-weight: 500;
+  color: var(--link-color);
+  transition: color 0.3s ease;
+}
+
+.buttons a:hover {
+  color: var(--hover-color);
+}
+
+/* Pie de página */
+footer {
+  margin-top: auto;
+  margin-bottom: 20px;
+}
+
+.logo {
+  width: 100px;
+  opacity: 0.7;
+}
+
+/* Mostrar logo según tema */
+.logo-claro { display: none; }
+.logo-oscuro { display: block; }
+
+@media (prefers-color-scheme: light) {
+  .logo-claro { display: block; }
+  .logo-oscuro { display: none; }
+}
+
+:root {
+  --bg-color: #1d1d1d;
+  --text-color: #f0f0f0;
+  --link-color: #00CE9D;
+  --hover-color: #F3C969;
+}
+
+/* Tema claro */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg-color: #f7f7f7;
+    --text-color: #0d0d0d;
+    --link-color: #676A6A;
+    --hover-color: #CDCAD3;
+  }
+}
+
+body {
+  margin: 0;
+  font-family: 'Segoe UI', sans-serif;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+}
+
+/* Tarjeta */
+.card {
+  text-align: center;
+  background-color: rgba(34, 34, 34, 0.9);
+  border-radius: 15px;
+  padding: 30px;
+  margin-top: 50px;
+  max-width: 360px;
+  width: 90%;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+}
+
+/* Imagen de perfil */
+.profile-img {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  margin-bottom: 15px;
+}
+
+/* Contacto */
+.contact p {
+  font-size: 14px;
+  margin: 6px 0;
+}
+
+.contact a {
+  color: var(--link-color);
+  text-decoration: none;
+}
+
+.contact a:hover {
+  color: var(--hover-color);
+}
+
+/* Botones */
+.buttons a {
+  display: block;
+  margin: 10px 0;
+  text-decoration: none;
+  font-weight: 500;
+  color: var(--link-color);
+  transition: color 0.3s ease;
+}
+
+.buttons a:hover {
+  color: var(--hover-color);
+}
+
+/* Pie de página */
+footer {
+  margin-top: auto;
+  margin-bottom: 20px;
+}
+
+/* Logo */
+.logo {
+  width: 100px;
+  opacity: 0;
+  animation: fadeLogo 2s ease-in forwards;
+}
+
+/* Animación de entrada */
+@keyframes fadeLogo {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 0.7; transform: translateY(0); }
+}
+
+/* Mostrar logo según tema */
+.logo-claro { display: none; }
+.logo-oscuro { display: block; }
+
+@media (prefers-color-scheme: light) {
+  .logo-claro { display: block; }
+  .logo-oscuro { display: none; }
+}
+
+/* Responsivo móvil */
+@media screen and (max-width: 600px) {
+  .card {
+    padding: 20px;
+    width: 95%;
+  }
+
+  .profile-img {
+    width: 80px;
+    height: 80px;
+  }
+
+  .logo {
+    width: 80px;
+  }
+}
