@@ -63,6 +63,13 @@
   .navcta{font-family:var(--sans);display:inline-block;border:1px solid var(--menta);color:var(--menta);
     padding:9px 18px;border-radius:2px;font-size:.72rem;font-weight:500;letter-spacing:.16em;text-transform:uppercase;transition:.25s}
   .navcta:hover{background:var(--menta);color:var(--noche)}
+  .langtog{font-family:var(--sans);display:inline-flex;align-items:center;gap:2px;margin-left:22px;font-size:.72rem;font-weight:500;letter-spacing:.1em}
+  .langtog a{color:var(--tenue);padding:4px 7px;border-radius:3px;transition:.2s}
+  .langtog a:hover{color:var(--sal)}
+  .langtog a.on{color:var(--noche);background:var(--menta);font-weight:600}
+  .langtog .sep{color:var(--tenue-d);opacity:.5}
+  .navwrap{display:flex;align-items:center}
+  @media(max-width:880px){.langtog{margin-left:auto;margin-right:12px}}
   .burger{display:none;background:none;border:0;color:var(--sal);cursor:pointer}
 
   /* ---------- HERO ---------- */
@@ -165,6 +172,19 @@
     body{font-size:17px}
   }
 </style>
+<script>
+  // Auto-detección de idioma: si el navegador está en inglés y el visitante
+  // no ha elegido idioma manualmente, redirige una sola vez a la versión EN.
+  (function(){
+    try{
+      var chosen = localStorage.getItem('inverzma_lang');
+      if(!chosen){
+        var l = (navigator.language || navigator.userLanguage || '').toLowerCase();
+        if(l.indexOf('en') === 0){ location.replace('index-en.html'); }
+      }
+    }catch(e){}
+  })();
+</script>
 </head>
 <body>
 
@@ -182,7 +202,10 @@
         <a href="#nosotros">Nosotros</a>
         <a href="#contacto">Contacto</a>
       </div>
-      <a class="navcta" href="#contacto">Cotizar</a>
+      <div class="navwrap">
+        <a class="navcta" href="#contacto">Cotizar</a>
+        <span class="langtog"><a href="index.html" class="on">ES</a><span class="sep">/</span><a href="index-en.html">EN</a></span>
+      </div>
       <button class="burger" aria-label="Menú" onclick="document.getElementById('contacto').scrollIntoView()">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="7" x2="21" y2="7"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="17" x2="21" y2="17"/></svg>
       </button>
@@ -347,6 +370,11 @@
   document.querySelectorAll('.reveal').forEach((el,i)=>{
     el.style.transitionDelay = (Math.min(i,6)*70)+'ms';
     io.observe(el);
+  });
+  document.querySelectorAll('.langtog a').forEach(function(a){
+    a.addEventListener('click',function(){
+      try{ localStorage.setItem('inverzma_lang', this.textContent.trim()==='EN'?'en':'es'); }catch(e){}
+    });
   });
   const head = document.getElementById('top');
   addEventListener('scroll',()=>{ head.style.background = scrollY>40 ? 'rgba(13,13,13,.9)' : 'rgba(13,13,13,.55)'; });
