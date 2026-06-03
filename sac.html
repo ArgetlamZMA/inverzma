@@ -207,6 +207,7 @@ footer b{color:var(--ink)}
 <div class="tabs">
   <button class="tab active" data-tab="clasif">Clasificar mercancía</button>
   <button class="tab" data-tab="buscar">Búsqueda directa en el SAC</button>
+  <button class="tab" data-tab="notas">Notas explicativas</button>
   <button class="tab" data-tab="ayuda">Reglas y notas</button>
 </div>
 
@@ -282,6 +283,24 @@ footer b{color:var(--ink)}
     </div>
     <div class="scount" id="scount"></div>
     <div id="sresults"></div>
+  </div>
+</section>
+
+<!-- ===== TAB NOTAS ===== -->
+<section id="tab-notas" class="hide">
+  <div class="panel" style="max-width: 900px; margin: 0 auto;">
+    <h2>Consulta de Notas Explicativas con IA</h2>
+    <div class="hint">Consulte las notas legales de sección, de capítulo y notas explicativas detalladas para cualquier partida o subpartida usando la inteligencia de Gemini (HS 2022).</div>
+    <div class="searchbar">
+      <input type="text" id="noteCode" placeholder="Ej.: 7318 · 7318.15 · 0901.21" style="font-family:'IBM Plex Mono',monospace;">
+      <button class="btn btn-ghost" id="noteBtn" style="padding: 10px 22px;">Consultar</button>
+    </div>
+    <div id="noteResults" style="margin-top: 20px; min-height: 150px;">
+      <div class="placeholder">
+        <div class="big">📖</div>
+        <div><b>Esperando consulta.</b><br>Escriba un código arriba y presione «Consultar», o presione «Ver Notas» en los candidatos de clasificación o de búsqueda.</div>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -361,8 +380,8 @@ const num = v => { const n=parseFloat(v); return isNaN(n)?0:n; };
 // Búsqueda de tasas para un código dado (con respaldos por prefijo)
 function lookupRate(raw){
   const d = (raw||'').replace(/\D/g,'');
-  if(d.length>=10 && byCode[d.slice(0,10)]) return {r:byCode[d.slice(0,10)], match:'exacto', used:d.slice(0,10)};
   if(byCode[d]) return {r:byCode[d], match:'exacto', used:d};
+  if(d.length>=10 && byCode[d.slice(0,10)]) return {r:byCode[d.slice(0,10)], match:'subpartida base (10 díg.)', used:d.slice(0,10)};
   // por 8 dígitos
   if(d.length>=8){ const f=REC.find(x=>x.c.slice(0,8)===d.slice(0,8)); if(f) return {r:f, match:'subpartida (8 díg.)', used:f.c}; }
   // por 6 dígitos
@@ -378,14 +397,17 @@ function fullDesc(r){
   return parts.join(' › ');
 }
 function fmtCode(c){ // 0101210000 -> 0101.21.00.00
-  return c.length===10 ? `${c.slice(0,4)}.${c.slice(4,6)}.${c.slice(6,8)}.${c.slice(8,10)}` : c;
+  const d = (c||'').replace(/\D/g,'');
+  if(d.length===10) return `${d.slice(0,4)}.${d.slice(4,6)}.${d.slice(6,8)}.${d.slice(8,10)}`;
+  if(d.length===12) return `${d.slice(0,4)}.${d.slice(4,6)}.${d.slice(6,8)}.${d.slice(8,10)}.${d.slice(10,12)}`;
+  return c;
 }
 
 /* ====== TABS ====== */
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');
-  ['clasif','buscar','ayuda'].forEach(id=>document.getElementById('tab-'+id).classList.add('hide'));
+  ['clasif','buscar','notas','ayuda'].forEach(id=>document.getElementById('tab-'+id).classList.add('hide'));
   document.getElementById('tab-'+t.dataset.tab).classList.remove('hide');
 });
 
@@ -397,7 +419,8 @@ function runSearch(){
   const digits=q.replace(/\D/g,'');
   let res=[];
   if(digits.length>=2 && digits.length===q.replace(/[.\s]/g,'').length){
-    res=REC.filter(r=>r.c.startsWith(digits)).slice(0,200);
+    const matchDigits = digits.length > 10 ? digits.slice(0, 10) : digits;
+    res=REC.filter(r=>r.c.startsWith(matchDigits)).slice(0,200);
   }
   if(res.length===0){
     const terms=q.split(/\s+/).filter(Boolean);
@@ -407,15 +430,26 @@ function runSearch(){
   out.innerHTML = res.map(r=>{
     const cf=r.cf?`<div class="cf">CAFTA ${r.cf}${r.cfa?'*':''}</div>`:'';
     return `<div class="srow">
-      <div><div class="code">${fmtCode(r.c)}</div><button class="usebtn" data-code="${r.c}">Usar →</button></div>
+      <div>
+        <div class="code">${fmtCode(r.c)}</div>
+        <div style="display:flex;gap:4px;margin-top:6px;">
+          <button class="usebtn" data-code="${r.c}">Usar →</button>
+          <button class="usebtn search-note-btn" data-code="${r.c}" style="background:rgba(0, 206, 157, 0.05);color:var(--accent);">Notas 📖</button>
+        </div>
+      </div>
       <div class="sd">${fullDesc(r)}</div>
       <div class="sr">DAI ${fmtRate(r.dai)} · ISV ${fmtRate(r.isv)}${r.isc!=='-'?' · ISC '+fmtRate(r.isc):''}${cf}</div>
     </div>`;
   }).join('');
-  out.querySelectorAll('.usebtn').forEach(b=>b.onclick=()=>{
+  out.querySelectorAll('.usebtn:not(.search-note-btn)').forEach(b=>b.onclick=()=>{
     document.querySelector('.tab[data-tab="clasif"]').click();
     renderManual(b.dataset.code);
     window.scrollTo({top:0,behavior:'smooth'});
+  });
+  out.querySelectorAll('.search-note-btn').forEach(b=>{
+    b.onclick=()=>{
+      viewNotesForCode(b.dataset.code);
+    };
   });
 }
 document.getElementById('qbtn').onclick=runSearch;
@@ -524,16 +558,23 @@ function renderManual(code){
   const box=document.getElementById('results');
   if(!lk){ box.innerHTML=`<div class="err">No se encontró el código <b>${code}</b> en el SAC. Verifique los dígitos.</div>`; return; }
   const r=lk.r;
+  const cleanCode = (code||'').replace(/\D/g,'');
   box.innerHTML=`<div class="summary-bar">Mostrando el inciso seleccionado manualmente. Use la pestaña de búsqueda o el clasificador para explorar alternativas.</div>
     <div class="candidate best">
-      <div class="cand-head"><div class="codebox"><div class="code">${fmtCode(r.c)}</div><div class="partida">Partida ${r.c.slice(0,2)}.${r.c.slice(2,4)} · Capítulo ${r.c.slice(0,2)}</div></div></div>
+      <div class="cand-head"><div class="codebox"><div class="code">${fmtCode(cleanCode)}</div><div class="partida">Partida ${r.c.slice(0,2)}.${r.c.slice(2,4)} · Capítulo ${r.c.slice(0,2)}</div></div></div>
       <div class="cand-body">
         <div class="desc-path">${fullDesc(r)}</div>
         ${gravBlock(r, lk.match)}
-        ${manualEditor(r.c)}
+        <div style="margin-top:12px;display:flex;gap:10px;">
+          <button class="btn btn-ghost note-btn-link" data-code="${cleanCode}" type="button" style="padding:6px 12px;font-size:12.5px;margin:0;border-radius:8px;">📖 Ver Notas Explicativas</button>
+        </div>
+        ${manualEditor(cleanCode)}
       </div></div>`;
   wireCalc(box);
   wireManualEditor(box);
+  box.querySelectorAll('.note-btn-link').forEach(btn => btn.onclick = () => {
+    viewNotesForCode(btn.dataset.code);
+  });
 }
 function manualEditor(code){
   return `<div class="qs"><div class="qtitle">Ajustar / verificar código</div>
@@ -568,12 +609,12 @@ const SYSTEM = `Eres un experto clasificador arancelario centroamericano especia
 Reglas de salida OBLIGATORIAS:
 - Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional, sin markdown, sin backticks.
 - Propón de 1 a 3 candidatos, ordenados del más probable al menos probable.
-- "codigo": da el código SAC más preciso posible en 10 dígitos sin puntos (ej. "7318150000"). Si solo tienes certeza hasta la subpartida, usa 6 u 8 dígitos y rellena con ceros; explica la incertidumbre en "justificacion".
-- Sé conciso. No inventes notas legales inexistentes.
+- "codigo": da el código arancelario más preciso posible de 10 o 12 dígitos sin puntos (ej. "7318150000" o "731815000010"). Si en el arancel de Honduras existen aperturas nacionales a 12 dígitos (por decretos, beneficios especiales u otros tratamientos), utilízalas y explica los motivos de la recomendación a nivel nacional en la justificación. Si solo tienes certeza hasta la partida o subpartida básica, usa 6 u 8 dígitos rellenos con ceros.
+- Sé conciso. No inventes notas legales o decretos inexistentes.
 
 Esquema JSON:
 {"resumen":"1 frase sobre la naturaleza del producto y el reto de clasificación",
- "candidatos":[{"codigo":"##########","partida":"##.##","descripcion":"texto de la partida/subpartida","confianza":"alta|media|baja","rgi":"regla(s) aplicada(s), ej. RGI 1 y 6","justificacion":"por qué clasifica aquí, 1-3 frases","alternativas":["#### — motivo breve"]}],
+ "candidatos":[{"codigo":"############","partida":"##.##","descripcion":"texto de la partida/subpartida","confianza":"alta|media|baja","rgi":"regla(s) aplicada(s), ej. RGI 1 y 6","justificacion":"por qué clasifica aquí, 1-3 frases","alternativas":["#### — motivo breve"]}],
  "preguntas":["dato técnico que reduciría la ambigüedad","otro dato útil"]}`;
 
 async function classify(){
@@ -642,8 +683,9 @@ function renderAI(obj){
   cands.forEach((c,i)=>{
     const lk=lookupRate(c.codigo);
     const r=lk?lk.r:null;
-    const codeShown = r?fmtCode(r.c):fmtCode((c.codigo||'').replace(/\D/g,''));
-    const partida = c.partida || (c.codigo?`${c.codigo.slice(0,2)}.${c.codigo.slice(2,4)}`:'');
+    const cleanCode = (c.codigo||'').replace(/\D/g,'');
+    const codeShown = fmtCode(cleanCode || (r?r.c:''));
+    const partida = c.partida || (cleanCode?`${cleanCode.slice(0,2)}.${cleanCode.slice(2,4)}`:'');
     const conf=(c.confianza||'media').toLowerCase();
     const alts=(c.alternativas&&c.alternativas.length)?`<div class="alts"><b>Alternativas a considerar:</b><br>${c.alternativas.map(a=>`<span class="a">• ${a}</span>`).join('<br>')}</div>`:'';
     html+=`<div class="candidate ${i===0?'best':''}">
@@ -657,6 +699,9 @@ function renderAI(obj){
         ${c.justificacion?`<div class="just">${c.justificacion}</div>`:''}
         ${r?gravBlock(r,lk.match):`<div class="cafta na">No se hallaron gravámenes para este código en el SAC local. Use el ajuste de código abajo.</div>`}
         ${alts}
+        <div style="margin-top:12px;display:flex;gap:10px;">
+          <button class="btn btn-ghost note-btn-link" data-code="${cleanCode}" type="button" style="padding:6px 12px;font-size:12.5px;margin:0;border-radius:8px;">📖 Ver Notas Explicativas</button>
+        </div>
         ${manualEditor(r?r.c:'')}
       </div></div>`;
   });
@@ -668,6 +713,9 @@ function renderAI(obj){
   }
   box.innerHTML=html;
   wireCalc(box); wireManualEditor(box);
+  box.querySelectorAll('.note-btn-link').forEach(btn => btn.onclick = () => {
+    viewNotesForCode(btn.dataset.code);
+  });
   // chips -> añaden al campo de info adicional
   box.querySelectorAll('.chip').forEach(ch=>ch.onclick=()=>{
     const f=document.getElementById('f_extra'); f.value=(f.value?f.value+'; ':'')+ch.textContent;
@@ -675,6 +723,109 @@ function renderAI(obj){
     f.focus(); window.scrollTo({top:0,behavior:'smooth'});
   });
 }
+
+document.getElementById('goBtn').onclick=classify;
+
+/* ====== CONSULTA DE NOTAS EXPLICATIVAS ====== */
+async function fetchExplanatoryNotes(code) {
+  const cleanCode = (code||'').trim().replace(/[.\s]/g, '');
+  const out = document.getElementById('noteResults');
+  if(!cleanCode){
+    out.innerHTML = `<div class="err">Por favor, ingrese un código arancelario válido.</div>`;
+    return;
+  }
+  
+  const apiKey = document.getElementById('gemini_key').value.trim();
+  if(!apiKey){
+    out.innerHTML = `<div class="err"><b>API Key requerida:</b> Por favor, configure su clave de API de Gemini en la pestaña de Clasificación para poder realizar consultas con IA.</div>`;
+    document.querySelector('.tab[data-tab="clasif"]').click();
+    document.getElementById('gemini_config').open = true;
+    document.getElementById('gemini_key').focus();
+    return;
+  }
+  
+  const model = document.getElementById('gemini_model').value;
+  const btn = document.getElementById('noteBtn');
+  btn.disabled = true; btn.textContent = 'Consultando…';
+  out.innerHTML = `<div class="placeholder"><div class="spinner" style="border-top-color:var(--mint-d);border-left-color:var(--mint-d);width:30px;height:30px;border-width:3px;"></div><div style="margin-top:12px;">Consultando Notas Explicativas en Gemini para el código ${fmtCode(cleanCode)}…</div></div>`;
+  
+  try {
+    const prompt = `Proporciona las Notas Explicativas oficiales del Sistema Armonizado (HS 2022) y las Notas Legales relevantes aplicables a la partida o subpartida arancelaria "${fmtCode(cleanCode)}" en español.
+Sé profesional, estructurado y preciso. Utiliza un formato limpio con títulos en Markdown, listas y negritas para facilitar la lectura. No inventes información. Si el código no existe o no tiene notas específicas, explícalo y proporciona la partida de 4 dígitos o capítulo superior aplicable.`;
+
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [{ text: prompt }]
+        }],
+        generationConfig: {
+          temperature: 0.2
+        }
+      })
+    });
+    
+    if(!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      const errMsg = errData.error?.message || `HTTP ${resp.status}`;
+      throw new Error(errMsg);
+    }
+    
+    const data = await resp.json();
+    const txt = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No se recibió respuesta.';
+    out.innerHTML = `<div class="candidate best"><div class="cand-body" style="line-height: 1.6; font-size:14.5px;">${formatMarkdown(txt)}</div></div>`;
+  } catch (err) {
+    out.innerHTML = `<div class="err"><b>No se pudieron cargar las notas explicativas.</b> (${err.message})</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Consultar';
+  }
+}
+
+function formatMarkdown(txt) {
+  let html = txt
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+    
+  html = html.replace(/^### (.*$)/gim, '<h3 style="color:var(--mint-d);margin-top:16px;margin-bottom:8px;font-size:16px;font-weight:600;">$1</h3>');
+  html = html.replace(/^## (.*$)/gim, '<h2 style="color:var(--ink);margin-top:20px;margin-bottom:10px;font-size:18px;font-weight:600;">$1</h2>');
+  html = html.replace(/^# (.*$)/gim, '<h1 style="color:var(--ink);margin-top:24px;margin-bottom:12px;font-size:22px;font-weight:600;">$1</h1>');
+  
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  
+  html = html.replace(/^\s*[-*+]\s+(.*$)/gim, '<li style="margin-left:20px;margin-bottom:4px;">$1</li>');
+  
+  html = html.split('\n').map(line => {
+    if (line.trim().startsWith('<h') || line.trim().startsWith('<li') || line.trim().startsWith('<ul')) {
+      return line;
+    }
+    return line + '<br>';
+  }).join('\n');
+  
+  html = html.replace(/(<br>\s*){2,}/g, '<br><br>');
+  return html;
+}
+
+function viewNotesForCode(code) {
+  const notesTab = document.querySelector('.tab[data-tab="notas"]');
+  if (notesTab) {
+    notesTab.click();
+    document.getElementById('noteCode').value = fmtCode(code);
+    fetchExplanatoryNotes(code);
+  }
+}
+
+document.getElementById('noteBtn').onclick = () => {
+  fetchExplanatoryNotes(document.getElementById('noteCode').value);
+};
+document.getElementById('noteCode').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    fetchExplanatoryNotes(document.getElementById('noteCode').value);
+  }
+});
 
 document.getElementById('goBtn').onclick=classify;
 
