@@ -175,6 +175,9 @@ footer{margin-top:40px;border-top:1px solid var(--line);padding-top:18px;font-si
 footer b{color:var(--ink)}
 .legal{background:var(--paper2);border:1px solid var(--line);border-radius:10px;padding:14px 16px;font-size:12.2px;line-height:1.55;color:var(--ink2)}
 .hide{display:none}
+#bulkTable th{border-bottom:2px solid var(--line);padding:10px 8px;font-weight:600}
+#bulkTable td{border-bottom:1px solid var(--line2);padding:10px 8px;vertical-align:top}
+#bulkTable tr:hover{background:rgba(0,206,157,.03)}
 </style>
 </head>
 <body>
@@ -208,6 +211,7 @@ footer b{color:var(--ink)}
   <button class="tab active" data-tab="clasif">Clasificar mercancía</button>
   <button class="tab" data-tab="buscar">Búsqueda directa en el SAC</button>
   <button class="tab" data-tab="notas">Notas explicativas</button>
+  <button class="tab" data-tab="lotes">Clasificar por lote</button>
   <button class="tab" data-tab="ayuda">Reglas y notas</button>
 </div>
 
@@ -304,6 +308,65 @@ footer b{color:var(--ink)}
   </div>
 </section>
 
+<!-- ===== TAB NOTAS ===== -->
+<section id="tab-lotes" class="hide">
+  <div class="panel" style="max-width: 1100px; margin: 0 auto;">
+    <h2>Clasificación por Lotes (Batch)</h2>
+    <div class="hint">Pegue una lista de descripciones comerciales de mercancías (una por línea, copiadas directamente de Excel) para clasificarlas en secuencia con la IA de Gemini.</div>
+    
+    <label for="bulkList">Descripciones de productos (una por línea)</label>
+    <textarea id="bulkList" placeholder="Ej.:&#10;Tornillos de acero inoxidable hexagonal&#10;Café tostado en grano 1kg&#10;Pantalones de mezclilla para caballeros" style="min-height: 150px; font-size:14px; line-height: 1.4;"></textarea>
+    
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-top:14px;">
+      <div style="display:flex; gap:16px; align-items:center;">
+        <div>
+          <label for="delaySelect" style="margin:0 0 4px; font-size:11px;">Retraso entre consultas (RPM)</label>
+          <select id="delaySelect" style="padding:6px 10px; font-size:13.5px; width:auto; border-radius:8px;">
+            <option value="4500" selected>Límite gratis (esperar 4.5 segundos) - Evita bloqueos</option>
+            <option value="500">Sin límite / Cuenta de pago (esperar 0.5 segundos) - Más rápido</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-ghost" id="exportBtn" style="padding: 10px 18px; display:none;" type="button">📥 Exportar a Excel (CSV)</button>
+        <button class="btn btn-primary" id="processBtn" style="padding: 10px 24px; margin-top:0;" type="button">Procesar lote</button>
+      </div>
+    </div>
+    
+    <!-- Progreso -->
+    <div id="bulkProgress" class="hide" style="margin-top: 18px; background: rgba(0,206,157,.06); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;">
+      <div style="display:flex; justify-content:space-between; font-weight:600; font-size:13.5px;">
+        <span id="progressText" style="color:var(--mint-d);">Procesando...</span>
+        <span id="progressPercent" style="font-family:'IBM Plex Mono',monospace;">0%</span>
+      </div>
+      <div style="margin-top:8px; height:6px; background:var(--line); border-radius:3px; overflow:hidden;">
+        <div id="progressBar" style="width:0%; height:100%; background:var(--mint); transition: width 0.3s ease;"></div>
+      </div>
+    </div>
+    
+    <!-- Tabla de Resultados -->
+    <div id="bulkTableContainer" style="margin-top: 22px; overflow-x: auto; display:none;">
+      <table id="bulkTable" style="width:100%; border-collapse:collapse; font-size:13.5px; text-align:left;">
+        <thead>
+          <tr style="border-bottom:2px solid var(--ink); font-weight:600; color:var(--ink2);">
+            <th style="padding:10px 8px; width:30px;">#</th>
+            <th style="padding:10px 8px; min-width:180px;">Descripción Original</th>
+            <th style="padding:10px 8px; min-width:110px;">Código Sugerido</th>
+            <th style="padding:10px 8px; min-width:200px;">Descripción SAC / Coincidencia</th>
+            <th style="padding:10px 8px; width:60px;">DAI</th>
+            <th style="padding:10px 8px; width:60px;">ISV</th>
+            <th style="padding:10px 8px; width:90px;">CAFTA</th>
+            <th style="padding:10px 8px; min-width:200px;">Justificación / RGI</th>
+          </tr>
+        </thead>
+        <tbody id="bulkTableBody">
+          <!-- Las filas se inyectan dinámicamente -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
 <!-- ===== TAB AYUDA ===== -->
 <section id="tab-ayuda" class="hide">
   <div class="panel">
@@ -368,7 +431,11 @@ const cl = document.getElementById('catlist');
   li.innerHTML=`<b>${k} — ${m.t}.</b> ${m.d}`; cl.appendChild(li);
 });
 
-const isSpecific = v => v==='II' || v==='ESP';
+const isSpecific = v => {
+  if (typeof v !== 'string') return false;
+  const s = v.trim().toUpperCase();
+  return s === 'II' || s === 'ESP' || s.includes('ESPECIF') || s.includes('VAR');
+};
 const fmtRate = v => {
   if(v==null||v==='-'||v==='') return '—';
   if(v==='II') return 'Específico (II)';
@@ -407,7 +474,7 @@ function fmtCode(c){ // 0101210000 -> 0101.21.00.00
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');
-  ['clasif','buscar','notas','ayuda'].forEach(id=>document.getElementById('tab-'+id).classList.add('hide'));
+  ['clasif','buscar','notas','lotes','ayuda'].forEach(id=>document.getElementById('tab-'+id).classList.add('hide'));
   document.getElementById('tab-'+t.dataset.tab).classList.remove('hide');
 });
 
@@ -429,19 +496,25 @@ function runSearch(){
   cnt.textContent = res.length ? `${res.length} resultado(s)${res.length===200?'+ (mostrando 200)':''}` : 'Sin coincidencias.';
   out.innerHTML = res.map(r=>{
     const cf=r.cf?`<div class="cf">CAFTA ${r.cf}${r.cfa?'*':''}</div>`:'';
+    const isSpec = isSpecific(r.dai) || isSpecific(r.isc) || isSpecific(r.ispc);
+    const specBtnHtml = isSpec ? `<button class="usebtn search-spec-btn" data-code="${r.c}" style="background:rgba(255, 195, 66, 0.05);color:var(--amber-d);border-color:var(--amber);margin-left:4px;">Tarifa IA 🔍</button>` : '';
     return `<div class="srow">
       <div>
         <div class="code">${fmtCode(r.c)}</div>
-        <div style="display:flex;gap:4px;margin-top:6px;">
+        <div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">
           <button class="usebtn" data-code="${r.c}">Usar →</button>
           <button class="usebtn search-note-btn" data-code="${r.c}" style="background:rgba(0, 206, 157, 0.05);color:var(--accent);">Notas 📖</button>
+          ${specBtnHtml}
         </div>
       </div>
-      <div class="sd">${fullDesc(r)}</div>
+      <div class="sd">
+        ${fullDesc(r)}
+        <div class="search-spec-out" style="display:none;margin-top:8px;"></div>
+      </div>
       <div class="sr">DAI ${fmtRate(r.dai)} · ISV ${fmtRate(r.isv)}${r.isc!=='-'?' · ISC '+fmtRate(r.isc):''}${cf}</div>
     </div>`;
   }).join('');
-  out.querySelectorAll('.usebtn:not(.search-note-btn)').forEach(b=>b.onclick=()=>{
+  out.querySelectorAll('.usebtn:not(.search-note-btn):not(.search-spec-btn)').forEach(b=>b.onclick=()=>{
     document.querySelector('.tab[data-tab="clasif"]').click();
     renderManual(b.dataset.code);
     window.scrollTo({top:0,behavior:'smooth'});
@@ -451,15 +524,100 @@ function runSearch(){
       viewNotesForCode(b.dataset.code);
     };
   });
+  out.querySelectorAll('.search-spec-btn').forEach(b=>{
+    b.onclick=()=>{
+      const code = b.dataset.code;
+      const outEl = b.closest('.srow').querySelector('.search-spec-out');
+      fetchSpecificRate(code, outEl, b);
+    };
+  });
 }
 document.getElementById('qbtn').onclick=runSearch;
 document.getElementById('q').addEventListener('keydown',e=>{if(e.key==='Enter')runSearch();});
 let qto; document.getElementById('q').addEventListener('input',()=>{clearTimeout(qto);qto=setTimeout(runSearch,250);});
 
 /* ====== RENDER de un código (gravámenes + CAFTA + calculadora) ====== */
+const isVehicleCode = c => {
+  const code = (c || '').replace(/\D/g, '');
+  return code.startsWith('8701') || code.startsWith('8702') || code.startsWith('8703') || code.startsWith('8704') || code.startsWith('8711') || code.startsWith('8716');
+};
+
+function detectVehicleType(code, desc) {
+  const c = code.replace(/\D/g, '');
+  if (c.startsWith('8711')) return 'Motocicleta';
+  if (c.startsWith('8702')) return 'Bus';
+  if (c.startsWith('8701')) return 'Tractocamión';
+  if (c.startsWith('8704')) return 'Camión';
+  if (c.startsWith('8716')) return 'Remolque';
+  if (c.startsWith('8703')) {
+    const d = (desc || '').toLowerCase();
+    if (d.includes('camioneta') || d.includes('suv') || d.includes('familiar') || d.includes('rústic') || d.includes('rustic') || d.includes('4x4')) {
+      return 'Camioneta/SUV';
+    }
+    return 'Turismo';
+  }
+  return 'Turismo';
+}
+
+async function fetchSpecificRate(code, outEl, btn) {
+  const apiKey = document.getElementById('gemini_key').value.trim();
+  if(!apiKey){
+    outEl.innerHTML = `<div class="err"><b>API Key requerida:</b> Por favor, configure su clave de API de Gemini en la pestaña de Clasificación para poder realizar consultas con IA.</div>`;
+    document.querySelector('.tab[data-tab="clasif"]').click();
+    document.getElementById('gemini_config').open = true;
+    document.getElementById('gemini_key').focus();
+    return;
+  }
+  
+  const model = document.getElementById('gemini_model').value;
+  btn.disabled = true; btn.textContent = 'Consultando tarifa...';
+  outEl.style.display = 'block';
+  outEl.innerHTML = `<div style="display:flex;align-items:center;gap:10px;color:var(--ink2);"><span class="spinner" style="border-top-color:var(--amber-d);border-left-color:var(--amber-d);width:20px;height:20px;border-width:2.5px;"></span><span>Consultando tarifa específica aplicable en Gemini para el código ${fmtCode(code)}…</span></div>`;
+  
+  try {
+    const r = byCode[code];
+    const desc = r ? fullDesc(r) : '';
+    const prompt = `Dime las tasas impositivas específicas vigentes en Honduras (DAI específico, ISC específico o IPC/ISPC específico) aplicables al código arancelario "${fmtCode(code)}" (Descripción: "${desc}").
+Por favor, busca la información arancelaria oficial en el Sistema Arancelario Centroamericano (SAC) de Honduras, y también las preferencias arancelarias aplicables en el marco del TLC CAFTA-DR para mercancías originarias de EE. UU. (u otros acuerdos comerciales que apliquen).
+Proporciona los valores específicos o porcentajes correspondientes de forma clara (por ejemplo, centavos por galón de combustible, tasa por litro de alcohol puro, tasa por kilo de tabaco, etc.). Explica brevemente cómo se calcula el impuesto y cuál es el fundamento legal.
+Presenta la información de forma estructurada con títulos limpios en Markdown, negritas y viñetas para que sea muy fácil de leer.`;
+
+    const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{
+          role: "user",
+          parts: [{ text: prompt }]
+        }],
+        generationConfig: {
+          temperature: 0.2
+        }
+      })
+    });
+    
+    if(!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      const errMsg = errData.error?.message || `HTTP ${resp.status}`;
+      throw new Error(errMsg);
+    }
+    
+    const data = await resp.json();
+    const txt = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No se recibió respuesta.';
+    outEl.innerHTML = `<div style="background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px;line-height:1.55;color:var(--ink);text-align:left;">${formatMarkdown(txt)}</div>`;
+  } catch (err) {
+    outEl.innerHTML = `<div class="err"><b>No se pudo cargar la información arancelaria.</b> (${err.message})</div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = '🔍 Consultar tarifa específica con IA (Gemini)';
+  }
+}
+
 function gravBlock(r, match){
   const mClass = match==='exacto'?'exact':'';
   const mTxt = match==='exacto' ? 'Coincidencia exacta de código en el SAC.' : `Tasas tomadas de la ${match} más cercana — verifique el inciso exacto.`;
+  
+  const isVehicle = isVehicleCode(r.c);
+  
   let cafta='';
   if(r.cf){
     const m=CAT_MEANING[r.cf]||{t:'',d:'',cls:'na'};
@@ -471,7 +629,8 @@ function gravBlock(r, match){
   } else {
     cafta=`<div class="cafta na"><b>CAFTA-DR:</b> categoría no disponible para este código (posible cambio de nomenclatura entre enmiendas). Verifique la correlación en el Anexo 3.3.</div>`;
   }
-  return `
+
+  const headerHtml = `
     <div class="grav">
       <div class="gcell hl"><div class="lbl">DAI</div><div class="val">${fmtRate(r.dai)}</div></div>
       <div class="gcell"><div class="lbl">ISC</div><div class="val">${fmtRate(r.isc)}</div></div>
@@ -480,18 +639,136 @@ function gravBlock(r, match){
     </div>
     <div class="matchnote ${mClass}">${mTxt}</div>
     ${cafta}
+  `;
+
+  if (isVehicle) {
+    const detectedType = detectVehicleType(r.c, r.d);
+    const types = ["Motocicleta", "Turismo", "Camioneta/SUV", "Bus", "Camión", "Tractocamión", "Remolque"];
+    const typeOptions = types.map(t => `<option value="${t}" ${t === detectedType ? 'selected' : ''}>${t}</option>`).join('');
+
+    const parsedDai = parseFloat(r.dai) || 15;
+    const dais = [0, 5, 10, 15];
+    const daiOptions = dais.map(d => `<option value="${d}" ${d === parsedDai ? 'selected' : ''}>${d}%</option>`).join('');
+
+    return `
+      ${headerHtml}
+      <div class="calc vehicle-calc" data-code="${r.c}">
+        <h3 style="color:var(--accent);border-bottom:1px solid var(--line);padding-bottom:6px;margin-bottom:12px;display:flex;align-items:center;gap:6px;">
+          🚗 Calculadora Vehicular Especializada
+        </h3>
+        <div class="field2" style="margin-top:8px;">
+          <div>
+            <label>Tipo de Vehículo</label>
+            <select class="vType">${typeOptions}</select>
+          </div>
+          <div>
+            <label>Año del Vehículo</label>
+            <input type="number" class="vYear" value="2026" min="1950" max="2030">
+          </div>
+        </div>
+        
+        <div class="field2" style="margin-top:8px;">
+          <div>
+            <label>DAI Aplicable</label>
+            <select class="vDai">${daiOptions}</select>
+          </div>
+          <div>
+            <label>Tasa de Cambio (HNL x USD)</label>
+            <input type="number" class="vFactor" value="26.50" step="0.01">
+          </div>
+        </div>
+
+        <div class="field2" style="margin-top:8px;">
+          <div>
+            <label>Valor FOB (USD)</label>
+            <input type="number" class="vFob" placeholder="Costo factura" value="5500" min="0">
+          </div>
+          <div>
+            <label>Flete (USD)</label>
+            <input type="number" class="vFlete" placeholder="Costo transporte" value="1000" min="0">
+          </div>
+        </div>
+
+        <div class="field2" style="margin-top:8px;">
+          <div>
+            <label>Seguro (USD) <span style="font-weight:normal;text-transform:none;color:var(--ink2)">(auto-calculado: 1.5% FOB)</span></label>
+            <input type="number" class="vSeguro" placeholder="Costo seguro" value="82.50" min="0">
+          </div>
+          <div>
+            <label>Otros / Comprador Indirecto (USD)</label>
+            <input type="number" class="vOtros" placeholder="Otros cargos" value="70" min="0">
+          </div>
+        </div>
+
+        <details class="refine" style="margin-top:14px;background:rgba(255, 195, 66, 0.04);border-color:rgba(255, 195, 66, 0.3)">
+          <summary style="color:var(--amber-d)">Gastos Locales y Aduaneros Opcionales (HNL)</summary>
+          <div class="field2" style="margin-top:6px;">
+            <div>
+              <label>Almacenaje OPC (HNL)</label>
+              <input type="number" class="vGOPC" value="0" min="0">
+            </div>
+            <div>
+              <label>Honorarios Aduaneros (HNL)</label>
+              <input type="number" class="vGHon" value="0" min="0">
+            </div>
+          </div>
+          <div class="field2" style="margin-top:6px;">
+            <div>
+              <label>Vaciada / Maniobras (HNL)</label>
+              <input type="number" class="vGVac" value="0" min="0">
+            </div>
+            <div>
+              <label>Transporte Terrestre (HNL)</label>
+              <input type="number" class="vGTrans" value="0" min="0">
+            </div>
+          </div>
+          <div style="margin-top:6px;">
+            <label>Grúa TGU (HNL)</label>
+            <input type="number" class="vGGrua" value="0" min="0">
+          </div>
+        </details>
+
+        <div style="margin-top:16px;">
+          <button class="btn btn-primary vCalcBtn" type="button" style="margin-top:0;">Calcular Impuestos Vehiculares</button>
+        </div>
+
+        <div class="vcalc-out" style="display:none;margin-top:14px;"></div>
+      </div>
+    `;
+  }
+
+  const isSpec = isSpecific(r.dai) || isSpecific(r.isc) || isSpecific(r.ispc);
+  const specBtnHtml = isSpec ? `
+    <button class="btn btn-ghost spec-ia-btn" data-code="${r.c}" type="button" style="margin-top: 10px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px; font-size: 13.5px; border-color: var(--amber);">
+      🔍 Consultar tarifa específica con IA (Gemini)
+    </button>
+    <div class="spec-ia-out" style="display:none; margin-top:12px;"></div>
+  ` : '';
+
+  const specInputHtml = isSpec ? `
+    <div class="calcrow spec-row" style="margin-top:10px;">
+      <input type="number" placeholder="Tarifa Específica Adicional (L.)" class="specInput" style="max-width:230px;">
+      <span style="font-size:12.5px;color:var(--ink2);">Suma cargo fijo (L.) al total de impuestos</span>
+    </div>
+  ` : '';
+
+  return `
+    ${headerHtml}
+    ${specBtnHtml}
     <div class="calc">
       <h3>Calculadora de gravámenes</h3>
       <div class="calcrow">
         <input type="number" placeholder="Valor CIF (L o US$)" class="cifInput" data-code="${r.c}">
         <button class="btn btn-ghost calcBtn" type="button">Calcular</button>
       </div>
-      <label class="cafta-toggle">
+      ${specInputHtml}
+      <label class="cafta-toggle" style="margin-top:11px;">
         <input type="checkbox" class="caftaChk">
         <span class="tl"><b>Aplicar trato CAFTA-DR</b> — el bien es <b>originario</b> de un país del tratado (EE. UU. / Centroamérica / Rep. Dominicana) y cumple las reglas de origen.${r.cf?'':' <span style="color:var(--amber-d)">Nota: este código no tiene categoría CAFTA correlacionada; el escenario es solo referencial.</span>'}</span>
       </label>
       <div class="calc-out"></div>
-    </div>`;
+    </div>
+  `;
 }
 
 function computeTaxes(r, cif){
@@ -506,34 +783,214 @@ function computeTaxes(r, cif){
 function money(x){ return x.toLocaleString('es',{maximumFractionDigits:2,minimumFractionDigits:2}); }
 
 function wireCalc(scope){
-  scope.querySelectorAll('.calc').forEach(row=>{
+  // 1. Lógica de Calculadora Vehicular
+  scope.querySelectorAll('.vehicle-calc').forEach(vRow => {
+    const vType = vRow.querySelector('.vType');
+    const vYear = vRow.querySelector('.vYear');
+    const vDai = vRow.querySelector('.vDai');
+    const vFactor = vRow.querySelector('.vFactor');
+    const vFob = vRow.querySelector('.vFob');
+    const vFlete = vRow.querySelector('.vFlete');
+    const vSeguro = vRow.querySelector('.vSeguro');
+    const vOtros = vRow.querySelector('.vOtros');
+    const vGOPC = vRow.querySelector('.vGOPC');
+    const vGHon = vRow.querySelector('.vGHon');
+    const vGVac = vRow.querySelector('.vGVac');
+    const vGTrans = vRow.querySelector('.vGTrans');
+    const vGGrua = vRow.querySelector('.vGGrua');
+    const vCalcBtn = vRow.querySelector('.vCalcBtn');
+    const vOutEl = vRow.querySelector('.vcalc-out');
+
+    vFob.addEventListener('input', () => {
+      const fob = parseFloat(vFob.value) || 0;
+      vSeguro.value = (fob * 0.015).toFixed(2);
+    });
+
+    const runVehicleCalc = () => {
+      const fob = parseFloat(vFob.value) || 0;
+      const flete = parseFloat(vFlete.value) || 0;
+      const seguro = parseFloat(vSeguro.value) || 0;
+      const otros = parseFloat(vOtros.value) || 0;
+      const factor = parseFloat(vFactor.value) || 26.50;
+      const year = parseInt(vYear.value) || 2026;
+      const daiRate = parseFloat(vDai.value) || 0;
+      const type = vType.value;
+
+      const cifUsd = fob + flete + seguro + otros;
+      const cifHnl = cifUsd * factor;
+      const isAmnistia = year <= 2010;
+
+      let daiHnl = 0, iscHnl = 0, isvHnl = 0, ecotasa = 0, transporteDatos = 5 * factor;
+      let iscRate = 0, isExento = false, totalImpuestos = 0;
+
+      if (isAmnistia) {
+        totalImpuestos = 10000 + transporteDatos;
+      } else {
+        daiHnl = cifHnl * (daiRate / 100);
+        isExento = ['Motocicleta', 'Bus', 'Camión', 'Tractocamión', 'Remolque'].includes(type);
+        if (isExento) {
+          iscRate = 0;
+          iscHnl = 0;
+        } else {
+          if (cifUsd <= 7000) iscRate = 10;
+          else if (cifUsd <= 10000) iscRate = 15;
+          else if (cifUsd <= 20000) iscRate = 20;
+          else iscRate = 30;
+          iscHnl = (cifHnl + daiHnl) * (iscRate / 100);
+        }
+        isvHnl = (cifHnl + daiHnl + iscHnl) * 0.15;
+        
+        if (cifUsd <= 15000) ecotasa = 5000;
+        else if (cifUsd <= 25000) ecotasa = 7000;
+        else ecotasa = 10000;
+
+        totalImpuestos = daiHnl + iscHnl + isvHnl + transporteDatos + ecotasa;
+      }
+
+      const gOPC = parseFloat(vGOPC.value) || 0;
+      const gHon = parseFloat(vGHon.value) || 0;
+      const gVac = parseFloat(vGVac.value) || 0;
+      const gTrans = parseFloat(vGTrans.value) || 0;
+      const gGrua = parseFloat(vGGrua.value) || 0;
+      const totalGastos = gOPC + gHon + gVac + gTrans + gGrua;
+      const granTotal = totalImpuestos + totalGastos;
+
+      let body = '';
+      if (isAmnistia) {
+        body = `
+          <div class="cafta libre" style="margin-bottom:12px;">
+            <b>✅ APLICA LEY DE AMNISTÍA VEHICULAR</b><br>
+            <span style="font-size:12.5px;">El vehículo es año <b>${year}</b> (menor o igual a 2010). Aplica pago único de <b>L. 10,000.00</b> de impuestos aduaneros, más la tasa de transmisión de datos.</span>
+          </div>
+          <div class="cmp">
+            <div class="col">
+              <h4>Gravámenes de Importación (Amnistía)</h4>
+              <div class="line"><span>Pago Único de Amnistía</span><span>L. 10,000.00</span></div>
+              <div class="line"><span>Transmisión Datos ($5)</span><span>L. ${money(transporteDatos)}</span></div>
+              <div class="line tot"><span>Total Impuestos Aduana</span><span>L. ${money(totalImpuestos)}</span></div>
+            </div>
+          </div>
+        `;
+      } else {
+        const iscLabel = isExento ? 'Exento (0%)' : `${iscRate}%`;
+        body = `
+          <div class="cafta na" style="margin-bottom:12px;">
+            <b>❌ NO APLICA AMNISTÍA (Cálculo Normal)</b><br>
+            <span style="font-size:12.5px;">El vehículo es año <b>${year}</b> (posterior a 2010). Se calculan los gravámenes normales del arancel de Honduras.</span>
+          </div>
+          <div class="cmp">
+            <div class="col">
+              <h4>Gravámenes de Importación</h4>
+              <div class="line"><span>Valor CIF USD</span><span>$ ${money(cifUsd)}</span></div>
+              <div class="line"><span>Valor CIF HNL</span><span>L. ${money(cifHnl)}</span></div>
+              <div class="line"><span>DAI (${daiRate}%)</span><span>L. ${money(daiHnl)}</span></div>
+              <div class="line"><span>ISC (${iscLabel})</span><span>L. ${money(iscHnl)}</span></div>
+              <div class="line"><span>ISV (15%)</span><span>L. ${money(isvHnl)}</span></div>
+              <div class="line"><span>ECOTASA</span><span>L. ${money(ecotasa)}</span></div>
+              <div class="line"><span>Transmisión Datos ($5)</span><span>L. ${money(transporteDatos)}</span></div>
+              <div class="line tot"><span>Total Impuestos Aduana</span><span>L. ${money(totalImpuestos)}</span></div>
+            </div>
+          </div>
+        `;
+      }
+
+      let gastosBody = '';
+      if (totalGastos > 0) {
+        gastosBody = `
+          <div class="cmp" style="margin-top:12px;">
+            <div class="col">
+              <h4>Desglose de Gastos Locales</h4>
+              ${gOPC > 0 ? `<div class="line"><span>Almacenaje OPC</span><span>L. ${money(gOPC)}</span></div>` : ''}
+              ${gHon > 0 ? `<div class="line"><span>Honorarios Aduaneros</span><span>L. ${money(gHon)}</span></div>` : ''}
+              ${gVac > 0 ? `<div class="line"><span>Vaciada / Maniobras</span><span>L. ${money(gVac)}</span></div>` : ''}
+              ${gTrans > 0 ? `<div class="line"><span>Transporte Terrestre</span><span>L. ${money(gTrans)}</span></div>` : ''}
+              ${gGrua > 0 ? `<div class="line"><span>Grúa TGU</span><span>L. ${money(gGrua)}</span></div>` : ''}
+              <div class="line tot" style="border-top:1px solid var(--line);"><span>Total Gastos Locales</span><span>L. ${money(totalGastos)}</span></div>
+            </div>
+          </div>
+        `;
+      }
+
+      const granTotalBody = `
+        <div class="cmp" style="margin-top:12px;">
+          <div class="col fav">
+            <div class="line tot" style="border-top:none;margin-top:0;padding-top:0;font-size:16px;">
+              <span>💰 GRAN TOTAL ESTIMADO</span>
+              <span style="color:var(--mint-d);">L. ${money(granTotal)}</span>
+            </div>
+          </div>
+        </div>
+      `;
+
+      vOutEl.innerHTML = `${body}${gastosBody}${granTotalBody}
+        <div style="font-size:11.5px;color:var(--ink2);margin-top:8px">
+          Nota: El ISV se calcula sobre la base (CIF + DAI + ISC). La ECOTASA se establece según el valor CIF USD: &le;$15k: L.5,000; &le;$25k: L.7,000; &gt;$25k: L.10,000. Cifras estimadas sujetas a verificación en el sistema SARAH de Aduanas Honduras.
+        </div>`;
+      vOutEl.classList.add('show');
+    };
+
+    if (vCalcBtn) vCalcBtn.onclick = runVehicleCalc;
+    [vType, vYear, vDai, vFactor, vFob, vFlete, vSeguro, vOtros, vGOPC, vGHon, vGVac, vGTrans, vGGrua].forEach(el => {
+      el.addEventListener('change', runVehicleCalc);
+      el.addEventListener('input', runVehicleCalc);
+    });
+    runVehicleCalc();
+  });
+
+  // 2. Lógica de Consultar Tarifa Específica con IA
+  scope.querySelectorAll('.spec-ia-btn').forEach(btn => {
+    btn.onclick = () => {
+      const code = btn.dataset.code;
+      const outEl = btn.closest('.candidate')?.querySelector('.spec-ia-out') || btn.closest('.srow')?.querySelector('.search-spec-out') || btn.nextElementSibling;
+      fetchSpecificRate(code, outEl, btn);
+    };
+  });
+
+  // 3. Lógica de Calculadora General (para no-vehículos)
+  scope.querySelectorAll('.calc:not(.vehicle-calc)').forEach(row=>{
     const btn=row.querySelector('.calcBtn');
     const inp=row.querySelector('.cifInput');
     const chk=row.querySelector('.caftaChk');
+    const specInp=row.querySelector('.specInput');
     const outEl=row.querySelector('.calc-out');
+    
     const run=()=>{
       const r=byCode[inp.dataset.code]; const cif=parseFloat(inp.value);
       if(!r||isNaN(cif)||cif<=0){ outEl.classList.remove('show'); return; }
+      
       const useCafta=chk && chk.checked;
       const mfn=computeTaxes(r,cif);
+      
+      const specVal = parseFloat(specInp?.value || '0') || 0;
+      
       const line=(lbl,rate,amt,spec)=>`<div class="line"><span>${lbl} ${fmtRate(rate)}</span><span>${spec?'—':money(amt)}</span></div>`;
       const totLine=(t,spec)=>`<div class="line tot"><span>Total gravámenes</span><span>${money(t)}${spec?' + esp.':''}</span></div>`;
-      const specNote = mfn.anySpec ? `<div style="font-size:11.5px;color:var(--amber-d);margin-top:8px;font-weight:600">⚠ Este código incluye gravámenes de <b>régimen específico</b> (no expresados como %). El monto marcado “—” no es calculable porcentualmente: consulte la introducción del SAC y el sistema SARAH para la tarifa específica aplicable. El total mostrado excluye ese componente.</div>` : '';
+      
+      const specNote = mfn.anySpec ? `<div style="font-size:11.5px;color:var(--amber-d);margin-top:8px;font-weight:600">⚠ Este código incluye gravámenes de <b>régimen específico</b> (no expresados como %). Utilice el botón "Consultar tarifa con IA" arriba para conocer la tarifa específica y luego ingrésela en el campo de ajuste para sumarla al total.</div>` : '';
+      
+      const specLineHtml = specVal > 0 ? `<div class="line"><span>Tarifa Específica (Ajuste)</span><span>L. ${money(specVal)}</span></div>` : '';
+      
+      const mfnTotal = mfn.total + specVal;
+      
       const genCol=`<div class="col"><h4>${useCafta?'Régimen general (MFN)':'Gravámenes de importación'}</h4>
           ${line('DAI',r.dai,mfn.dai,mfn.daiSpec)}
           ${r.isc!=='-'?line('ISC',r.isc,mfn.isc,mfn.iscSpec):''}
           ${r.ispc!=='-'?line('ISPC',r.ispc,mfn.ispc,mfn.ispcSpec):''}
           ${line('ISV',r.isv,mfn.isv,mfn.isvSpec)}
-          ${totLine(mfn.total,mfn.anySpec)}
+          ${specLineHtml}
+          ${totLine(mfnTotal, mfn.anySpec && specVal === 0)}
         </div>`;
+        
       let body, foot;
       if(useCafta){
         const caf=computeTaxes({...r,dai:'0'},cif); // originario CAFTA → DAI 0%
+        const cafTotal = caf.total + specVal;
         const caftaCol=`<div class="col fav"><h4>CAFTA-DR · originario (DAI 0%)</h4>
           ${r.isc!=='-'?line('ISC',r.isc,caf.isc,caf.iscSpec):''}
           ${r.ispc!=='-'?line('ISPC',r.ispc,caf.ispc,caf.ispcSpec):''}
           ${line('ISV',r.isv,caf.isv,caf.isvSpec)}
-          ${totLine(caf.total,caf.iscSpec||caf.ispcSpec||caf.isvSpec)}
+          ${specLineHtml}
+          ${totLine(cafTotal, (caf.iscSpec||caf.ispcSpec||caf.isvSpec) && specVal === 0)}
         </div>`;
         const ahorro = (!mfn.daiSpec)?`<div style="font-size:12px;color:var(--mint-d);margin-top:8px;font-weight:600">Ahorro estimado por preferencia CAFTA (solo DAI): ${money(mfn.dai)}.</div>`:'';
         body=`<div class="cmp two">${genCol}${caftaCol}</div>${ahorro}`;
@@ -542,13 +999,17 @@ function wireCalc(scope){
         body=`<div class="cmp">${genCol}</div>`;
         foot=`Cálculo bajo <b>régimen general (MFN)</b>, sin preferencia arancelaria. Si el bien es originario de un país CAFTA-DR, marque la casilla para ver el escenario preferencial.`;
       }
+      
       outEl.innerHTML=`${body}${specNote}
       <div style="font-size:11.5px;color:var(--ink2);margin-top:8px">ISV calculado sobre base CIF + DAI + ISC/ISPC. ${foot} Cifras estimadas; verifique en SARAH.</div>`;
       outEl.classList.add('show');
     };
+    
     if(btn) btn.onclick=run;
     if(inp) inp.addEventListener('keydown',e=>{if(e.key==='Enter')run();});
+    if(specInp) specInp.addEventListener('keydown',e=>{if(e.key==='Enter')run();});
     if(chk) chk.addEventListener('change',()=>{ if(outEl.classList.contains('show')) run(); });
+    if(specInp) specInp.addEventListener('input',()=>{ if(outEl.classList.contains('show')) run(); });
   });
 }
 
@@ -662,7 +1123,7 @@ async function classify(){
     txt = txt.trim();
     txt=txt.replace(/^```json\s*/i,'').replace(/^```\s*/,'').replace(/```\s*$/,'').trim();
     const obj=JSON.parse(txt);
-    renderAI(obj);
+    renderAI(obj, data.usageMetadata);
   }catch(err){
     box.innerHTML=`<div class="err"><b>No se pudo completar el análisis con IA.</b> (${err.message})<br>
       Puede usar la <a href="#" id="toSearch">búsqueda directa en el SAC</a> o ingresar un código manualmente abajo.</div>
@@ -674,7 +1135,7 @@ async function classify(){
   }
 }
 
-function renderAI(obj){
+function renderAI(obj, usage){
   const box=document.getElementById('results');
   const cands=obj.candidatos||[];
   let html='';
@@ -705,6 +1166,11 @@ function renderAI(obj){
         ${manualEditor(r?r.c:'')}
       </div></div>`;
   });
+  if(usage && usage.totalTokenCount){
+    html+=`<div style="font-size:11.5px;color:var(--ink2);margin-top:12px;text-align:right;font-family:'IBM Plex Mono',monospace;">
+      Consumo de la consulta: ${usage.totalTokenCount.toLocaleString('es')} tokens (${usage.promptTokenCount.toLocaleString('es')} entrada / ${usage.candidatesTokenCount.toLocaleString('es')} salida)
+    </div>`;
+  }
   if(obj.preguntas&&obj.preguntas.length){
     html+=`<div class="candidate"><div class="cand-body"><div class="qs" style="border-top:none;padding-top:0">
       <div class="qtitle">Para afinar la clasificación, especifique:</div>
@@ -826,6 +1292,188 @@ document.getElementById('noteCode').addEventListener('keydown', e => {
     fetchExplanatoryNotes(document.getElementById('noteCode').value);
   }
 });
+
+document.getElementById('goBtn').onclick=classify;
+
+/* ====== CLASIFICACIÓN POR LOTES ====== */
+let bulkResults = [];
+
+async function processBulk() {
+  const text = document.getElementById('bulkList').value.trim();
+  const outContainer = document.getElementById('bulkTableContainer');
+  const tbody = document.getElementById('bulkTableBody');
+  const progressDiv = document.getElementById('bulkProgress');
+  const progText = document.getElementById('progressText');
+  const progPercent = document.getElementById('progressPercent');
+  const progBar = document.getElementById('progressBar');
+  const exportBtn = document.getElementById('exportBtn');
+  const processBtn = document.getElementById('processBtn');
+  
+  if (!text) {
+    alert("Por favor, ingrese al menos una descripción de producto.");
+    return;
+  }
+  
+  const apiKey = document.getElementById('gemini_key').value.trim();
+  if(!apiKey){
+    alert("API Key requerida. Por favor, configure su clave en la pestaña de Clasificación.");
+    document.querySelector('.tab[data-tab="clasif"]').click();
+    document.getElementById('gemini_config').open = true;
+    document.getElementById('gemini_key').focus();
+    return;
+  }
+  
+  const model = document.getElementById('gemini_model').value;
+  const delay = parseInt(document.getElementById('delaySelect').value) || 4500;
+  
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const total = lines.length;
+  
+  bulkResults = [];
+  tbody.innerHTML = '';
+  outContainer.style.display = 'block';
+  exportBtn.style.display = 'none';
+  progressDiv.classList.remove('hide');
+  processBtn.disabled = true;
+  processBtn.textContent = 'Procesando...';
+  
+  const sleep = ms => new Promise(res => setTimeout(res, ms));
+  
+  for (let i = 0; i < total; i++) {
+    const desc = lines[i];
+    const percent = Math.round((i / total) * 100);
+    progText.textContent = `Procesando producto ${i + 1} de ${total}: "${desc.substring(0, 30)}${desc.length > 30 ? '...' : ''}"`;
+    progPercent.textContent = `${percent}%`;
+    progBar.style.width = `${percent}%`;
+    
+    if (i > 0) {
+      await sleep(delay);
+    }
+    
+    let rowData = {
+      index: i + 1,
+      descOriginal: desc,
+      codigo: '—',
+      descSAC: 'Error / No clasificado',
+      dai: '—',
+      isv: '—',
+      cafta: '—',
+      justificacion: 'Ocurrió un error en la consulta.'
+    };
+    
+    try {
+      const prompt = `Clasifica esta mercancía según el SAC 2022 (Honduras): "${desc}".
+Responde ÚNICAMENTE con un objeto JSON en español con este formato exacto:
+{"codigo":"XXXXXXXXXX","descripcion":"Texto de la partida o subpartida","rgi":"Reglas aplicadas","justificacion":"Breve justificación de 1 a 2 frases"}`;
+
+      const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: "Eres un clasificador arancelario hondureño de alta precisión. Responde siempre en JSON plano según el formato especificado." }]
+          },
+          contents: [{
+            role: "user",
+            parts: [{ text: prompt }]
+          }],
+          generationConfig: {
+            responseMimeType: "application/json",
+            temperature: 0.1
+          }
+        })
+      });
+      
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      let txt = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      txt = txt.trim();
+      txt = txt.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+      const obj = JSON.parse(txt);
+      
+      const cleanCode = (obj.codigo || '').replace(/\D/g, '');
+      const lk = lookupRate(cleanCode);
+      
+      if (lk) {
+        const r = lk.r;
+        rowData.codigo = fmtCode(cleanCode);
+        rowData.descSAC = `<b>SAC:</b> ${fullDesc(r)}${lk.match !== 'exacto' ? ` <span style="color:var(--amber-d);">(${lk.match})</span>` : ''}`;
+        rowData.dai = fmtRate(r.dai);
+        rowData.isv = fmtRate(r.isv);
+        rowData.cafta = r.cf ? `Categoría ${r.cf}` : 'N/A';
+      } else {
+        rowData.codigo = fmtCode(cleanCode) || '—';
+        rowData.descSAC = `<b>Sugerido:</b> ${obj.descripcion || '—'}`;
+        rowData.dai = '—';
+        rowData.isv = '—';
+        rowData.cafta = 'N/A';
+      }
+      
+      rowData.justificacion = `${obj.rgi ? `[${obj.rgi}] ` : ''}${obj.justificacion || 'Sin justificación.'}`;
+      
+    } catch (err) {
+      rowData.justificacion = `Error al procesar: ${err.message}`;
+    }
+    
+    bulkResults.push(rowData);
+    
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="padding:10px 8px; border-bottom:1px solid var(--line2);">${rowData.index}</td>
+      <td style="padding:10px 8px; border-bottom:1px solid var(--line2); font-weight:500;">${rowData.descOriginal}</td>
+      <td style="padding:10px 8px; border-bottom:1px solid var(--line2); font-family:'IBM Plex Mono',monospace; font-weight:600; color:var(--ink);">${rowData.codigo}</td>
+      <td style="padding:10px 8px; border-bottom:1px solid var(--line2); color:var(--ink2);">${rowData.descSAC}</td>
+      <td style="padding:10px 8px; border-bottom:1px solid var(--line2); font-family:'IBM Plex Mono',monospace;">${rowData.dai}</td>
+      <td style="padding:10px 8px; border-bottom:1px solid var(--line2); font-family:'IBM Plex Mono',monospace;">${rowData.isv}</td>
+      <td style="padding:10px 8px; border-bottom:1px solid var(--line2); font-size:12px;">${rowData.cafta}</td>
+      <td style="padding:10px 8px; border-bottom:1px solid var(--line2); font-family:'Cormorant Garamond',serif; font-size:14px; color:var(--ink2);">${rowData.justificacion}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  
+  progText.textContent = `Procesamiento completado: ${total} productos clasificados.`;
+  progPercent.textContent = '100%';
+  progBar.style.width = '100%';
+  exportBtn.style.display = 'inline-block';
+  processBtn.disabled = false;
+  processBtn.textContent = 'Procesar lote';
+}
+
+function exportBulkToCSV() {
+  if (!bulkResults.length) return;
+  
+  const headers = ['#', 'Descripcion Original', 'Codigo Sugerido', 'Match SAC / Descripcion', 'DAI', 'ISV', 'CAFTA', 'Justificacion'];
+  const csvRows = [headers.join(';')];
+  
+  bulkResults.forEach(r => {
+    const cleanDescSAC = r.descSAC.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+    const row = [
+      r.index,
+      `"${r.descOriginal.replace(/"/g, '""')}"`,
+      `"${r.codigo}"`,
+      `"${cleanDescSAC.replace(/"/g, '""')}"`,
+      `"${r.dai}"`,
+      `"${r.isv}"`,
+      `"${r.cafta}"`,
+      `"${r.justificacion.replace(/"/g, '""')}"`
+    ];
+    csvRows.push(row.join(';'));
+  });
+  
+  const csvContent = '\uFEFF' + csvRows.join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", `Clasificaciones_INVERZMA_${new Date().toISOString().slice(0,10)}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+document.getElementById('processBtn').onclick = processBulk;
+document.getElementById('exportBtn').onclick = exportBulkToCSV;
 
 document.getElementById('goBtn').onclick=classify;
 
